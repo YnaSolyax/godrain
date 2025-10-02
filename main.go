@@ -13,8 +13,8 @@ import (
 func preprocess(line string) string {
 	tokens := strings.Fields(line)
 
-	if len(tokens) > 5 {
-		return strings.Join(tokens[5:], " ")
+	if len(tokens) > 9 {
+		return strings.Join(tokens[9:], " ")
 	}
 	return line
 }
@@ -26,7 +26,7 @@ func main() {
 
 	d, err := drain3.NewDrain(
 		drain3.WithDepth(4),
-		drain3.WithSimTh(0.7),
+		drain3.WithSimTh(0.3),
 		drain3.WithMaxChildren(100),
 	)
 
@@ -45,11 +45,13 @@ func main() {
 
 	scanner := bufio.NewScanner(file)
 
-	for i := 0; i < 20 && scanner.Scan(); i++ {
+	for i := 5000; i < 8000 && scanner.Scan(); i++ {
+
 		raw := scanner.Text()
 		msg := preprocess(raw)
+		tokens := strings.Fields(raw)
 
-		cluster, clusterType, err := d.AddLogMessage(msg)
+		cluster, _, err := d.AddLogMessage(msg)
 		if err != nil {
 			logger.Error("logMsg")
 		}
@@ -57,12 +59,11 @@ func main() {
 		fmt.Printf(
 			"Line %d\n", i+1,
 		)
-		fmt.Printf("  Cluster ID:    %d\n", cluster.ClusterId)
-		fmt.Printf("  Update Type:   %d\n", clusterType)
+		fmt.Printf("  Timestamp:     %s\n", tokens[4:5])
+		fmt.Printf("  Level:         %s\n", tokens[8:9])
+		fmt.Printf("  Component:     %s\n", tokens[5:8])
 		fmt.Printf("  Template:      %s\n", cluster.GetTemplate())
-		fmt.Printf("  string:        %s\n", cluster.String())
 		fmt.Printf("  Tokens:        %v\n", cluster.LogTemplateTokens)
-		fmt.Printf("  Messages seen: %d\n\n", cluster.Size)
 
 	}
 
