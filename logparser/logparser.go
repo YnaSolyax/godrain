@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/jaeyo/go-drain3/pkg/drain3"
 	"go.uber.org/zap"
 )
 
-type ParseLog struct {
+type Log struct {
 	Timestamp string `json:"timestamp"`
 	Level     string `json:"level"`
 	Component string `json:"component"`
@@ -19,18 +20,61 @@ type ParseLog struct {
 	ClusterID int64  `json:"cluster_id"`
 }
 
-func preprocess(line string) string {
-	tokens := strings.Fields(line)
-
-	if len(tokens) > 9 {
-		return strings.Join(tokens[9:], " ")
+func GetLogFields(filename string, format string) {
+	logDir := "logs"
+	line := ""
+	haveFormat := map[string]bool{
+		"Timestamp": true,
+		"Level":     true,
+		"Content":   true,
 	}
-	return line
+	indexes := make([]int, 0, 5)
+
+	fullPath := filepath.Join(logDir, filename)
+
+	file, err := os.Open(fullPath)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+
+	if scanner.Scan() {
+		line = scanner.Text()
+	}
+
+	if err := scanner.Err(); err != nil {
+		return
+	}
+	findformat := strings.Fields(format)
+	fmt.Println(findformat)
+	for i, ff := range findformat {
+		cutFF := strings.Trim(ff, "[]")
+
+		if haveFormat[cutFF] {
+			indexes = append(indexes, i)
+		}
+	}
+
+	lenFormat := len(findformat)
+	foundIndexes := strings.SplitN(line, " ", lenFormat)
+	fmt.Println(foundIndexes)
+
+	for _, ind := range indexes {
+		fmt.Println(foundIndexes[ind])
+	}
+	fmt.Println(line)
+
 }
 
 func readLog(fileName string, size int) ([][]string, error) {
 
-	file, err := os.Open(fileName)
+	logDir := "logs"
+
+	fullPath := filepath.Join(logDir, fileName)
+
+	file, err := os.Open(fullPath)
 	if err != nil {
 		return nil, err
 	}
@@ -64,23 +108,12 @@ func readLog(fileName string, size int) ([][]string, error) {
 
 }
 
-func parse(line []string, uniqueCluster map[int64]bool) ([]*ParseLog, error) {
+func parse(d *drain3.Drain, line []string, uniqueCluster map[int64]bool, msg string) ([]*Log, error) {
 
-	d, err := drain3.NewDrain(
-		drain3.WithDepth(4),
-		drain3.WithSimTh(0.1),
-		drain3.WithMaxChildren(100),
-	)
-
-	if err != nil {
-		return nil, err
-	}
-
-	newLog := []*ParseLog{}
+	newLog := []*Log{}
 
 	for _, l := range line {
 
-		msg := preprocess(l)
 		tokens := strings.Fields(l)
 		cluster, _, err := d.AddLogMessage(msg)
 
@@ -91,7 +124,7 @@ func parse(line []string, uniqueCluster map[int64]bool) ([]*ParseLog, error) {
 		if !uniqueCluster[cluster.ClusterId] {
 			uniqueCluster[cluster.ClusterId] = true
 
-			newLog = append(newLog, &ParseLog{
+			newLog = append(newLog, &Log{
 				Timestamp: tokens[4],
 				Level:     tokens[8],
 				Component: strings.Join(tokens[5:8], " "),
@@ -104,7 +137,17 @@ func parse(line []string, uniqueCluster map[int64]bool) ([]*ParseLog, error) {
 
 }
 
-func (p *ParseLog) ParseLog() error {
+func (p *Log) ParseLog(filename string, msg string) error {
+
+	d, err := drain3.NewDrain(
+		drain3.WithDepth(4),
+		drain3.WithSimTh(0.1),
+		drain3.WithMaxChildren(100),
+	)
+
+	if err != nil {
+		return err
+	}
 
 	logger, err := zap.NewProduction()
 	if err != nil {
@@ -113,16 +156,16 @@ func (p *ParseLog) ParseLog() error {
 	defer logger.Sync()
 
 	uniqueCluster := make(map[int64]bool, 8)
-	parsedLogs := []*ParseLog{}
+	parsedLogs := []*Log{}
 
-	files, err := readLog("BGL.log", 250000)
+	files, err := readLog(filename, 250000)
 
 	if err != nil {
 		return err
 	}
 
 	for _, file := range files {
-		log, err := parse(file, uniqueCluster)
+		log, err := parse(d, file, uniqueCluster, msg)
 		if err != nil {
 			return err
 		}
