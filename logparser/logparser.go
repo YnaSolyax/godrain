@@ -15,139 +15,98 @@ import (
 type Log struct {
 	Timestamp string `json:"timestamp"`
 	Level     string `json:"level"`
-	Component string `json:"component"`
 	Cluster   string `json:"cluster"`
 	ClusterID int64  `json:"cluster_id"`
 }
 
-func GetLogFields(filename string, format string) {
-	logDir := "logs"
-	line := ""
-	haveFormat := map[string]bool{
-		"Timestamp": true,
-		"Level":     true,
-		"Content":   true,
+type fields struct {
+	Timestamp int
+	lvl       int
+	content   int
+}
+
+func newFileds(Timestamp int, lvl int, content int) *fields {
+	return &fields{
+		Timestamp: Timestamp,
+		lvl:       lvl,
+		content:   content,
 	}
-	indexes := make([]int, 0, 5)
+}
 
-	fullPath := filepath.Join(logDir, filename)
-
-	file, err := os.Open(fullPath)
-	if err != nil {
-		return
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-
-	if scanner.Scan() {
-		line = scanner.Text()
-	}
-
-	if err := scanner.Err(); err != nil {
-		return
-	}
+func GetLogFields(format string) *fields {
+	field := newFileds(-1, -1, -1)
 	findformat := strings.Fields(format)
-	fmt.Println(findformat)
+
 	for i, ff := range findformat {
-		cutFF := strings.Trim(ff, "[]")
-
-		if haveFormat[cutFF] {
-			indexes = append(indexes, i)
+		clean := strings.Trim(ff, "[]")
+		switch clean {
+		case "Timestamp":
+			field.Timestamp = i
+		case "Level":
+			field.lvl = i
+		case "Content":
+			field.content = i
 		}
 	}
 
-	lenFormat := len(findformat)
-	foundIndexes := strings.SplitN(line, " ", lenFormat)
-	fmt.Println(foundIndexes)
-
-	for _, ind := range indexes {
-		fmt.Println(foundIndexes[ind])
-	}
-	fmt.Println(line)
+	return field
 
 }
 
-func readLog(fileName string, size int) ([][]string, error) {
+func processBatch(d *drain3.Drain, lines []string, uniqueCluster map[int64]bool, field *fields) {
 
-	logDir := "logs"
+	processedLogs := make([]*Log, 0, len(lines))
 
-	fullPath := filepath.Join(logDir, fileName)
-
-	file, err := os.Open(fullPath)
-	if err != nil {
-		return nil, err
-	}
-
-	scanner := bufio.NewScanner(file)
-	batch := make([]string, 0, size)
-	allBatches := make([][]string, 0, 20)
-	currentBatch := 0
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		batch = append(batch, line)
-
-		if len(batch) == size {
-			currentBatch++
-			allBatches = append(allBatches, batch)
-			batch = batch[:0]
+	for _, l := range lines {
+		if len(strings.TrimSpace(l)) == 0 {
+			continue
 		}
 
-	}
+		found := strings.Fields(l)
 
-	if len(batch) > 0 {
-		fmt.Printf("Batch %d: %d lines read\n", currentBatch, len(batch))
-	}
+		time, lvl, cont := "", "", ""
 
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
+		if field.Timestamp != -1 {
+			time = found[field.Timestamp]
+		}
 
-	return allBatches, nil
+		if field.lvl != -1 {
+			lvl = found[field.lvl]
+		}
 
-}
+		if field.content != -1 {
+			cont = strings.Join(found[field.content:], " ")
+		} else {
+			cont = l
+		}
 
-func parse(d *drain3.Drain, line []string, uniqueCluster map[int64]bool, msg string) ([]*Log, error) {
-
-	newLog := []*Log{}
-
-	for _, l := range line {
-
-		tokens := strings.Fields(l)
-		cluster, _, err := d.AddLogMessage(msg)
-
+		cluster, _, err := d.AddLogMessage(cont)
 		if err != nil {
-			return nil, err
+			continue
 		}
 
 		if !uniqueCluster[cluster.ClusterId] {
 			uniqueCluster[cluster.ClusterId] = true
 
-			newLog = append(newLog, &Log{
-				Timestamp: tokens[4],
-				Level:     tokens[8],
-				Component: strings.Join(tokens[5:8], " "),
+			newLog := &Log{
+				Timestamp: time,
+				Level:     lvl,
 				Cluster:   cluster.GetTemplate(),
 				ClusterID: cluster.ClusterId,
-			})
+			}
+			processedLogs = append(processedLogs, newLog)
 		}
 	}
-	return newLog, nil
 
+	if len(processedLogs) > 0 {
+		jsonData, err := json.MarshalIndent(processedLogs, "", "  ")
+		if err == nil {
+			fmt.Println(string(jsonData))
+		}
+	}
 }
 
-func (p *Log) ParseLog(filename string, msg string) error {
-
-	d, err := drain3.NewDrain(
-		drain3.WithDepth(4),
-		drain3.WithSimTh(0.1),
-		drain3.WithMaxChildren(100),
-	)
-
-	if err != nil {
-		return err
-	}
+func (p *Log) ParseLog(filename string, format string) error {
 
 	logger, err := zap.NewProduction()
 	if err != nil {
@@ -155,38 +114,53 @@ func (p *Log) ParseLog(filename string, msg string) error {
 	}
 	defer logger.Sync()
 
-	uniqueCluster := make(map[int64]bool, 8)
-	parsedLogs := []*Log{}
-
-	files, err := readLog(filename, 250000)
-
+	d, err := drain3.NewDrain(
+		drain3.WithDepth(4),
+		drain3.WithSimTh(0.4),
+		drain3.WithMaxChildren(100),
+	)
 	if err != nil {
 		return err
 	}
 
-	for _, file := range files {
-		log, err := parse(d, file, uniqueCluster, msg)
-		if err != nil {
-			return err
-		}
-		jsonData, err := json.MarshalIndent(log, "", "  ")
-		if err != nil {
-			logger.Error("JSON marshal failed", zap.Error(err))
-			return err
-		}
-		fmt.Println(string(jsonData))
-	}
+	indexes := GetLogFields(format)
 
-	info, _ := os.Stat("BGL.log")
-	size := info.Size()
-	fmt.Printf("Размер файла %s: %d байт\n", "BGL.log", size)
-
-	jsonData, err := json.MarshalIndent(parsedLogs, "", "  ")
+	logDir := "logs"
+	fullPath := filepath.Join(logDir, filename)
+	file, err := os.Open(fullPath)
 	if err != nil {
-		logger.Error("JSON marshal failed", zap.Error(err))
 		return err
 	}
-	fmt.Println(string(jsonData))
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	buf := make([]byte, 0, 1024*1024)
+	scanner.Buffer(buf, 1024*1024)
+
+	batchSize := 1000
+	batch := make([]string, 0, batchSize)
+	uniqueCluster := make(map[int64]bool)
+
+	fmt.Printf("Начинаю анализ файла: %s\n", fullPath)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		batch = append(batch, line)
+
+		if len(batch) >= batchSize {
+			processBatch(d, batch, uniqueCluster, indexes)
+			batch = batch[:0]
+		}
+	}
+
+	if len(batch) > 0 {
+		processBatch(d, batch, uniqueCluster, indexes)
+	}
+
+	if err := scanner.Err(); err != nil {
+		logger.Error("Ошибка чтения файла", zap.Error(err))
+		return err
+	}
 
 	return nil
 }

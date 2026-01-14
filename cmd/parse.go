@@ -1,6 +1,3 @@
-/*
-Copyright © 2025 NAME HERE <EMAIL ADDRESS>
-*/
 package cmd
 
 import (
@@ -16,7 +13,7 @@ var parseCmd = &cobra.Command{
 	Use:   "parse",
 	Short: "parsing a file with logs of a specific format",
 	Long: `This command is used for logs with a known format.
-	]The input is the file name and log format, for example: 
+	The input is the file name and log format, for example: 
 	parse BGL.log [Label] [Timestamp] [Date] [Node] [Time] [NodeRepeat] [Type] [Component] [Level] [Content]"`,
 
 	Run: func(cmd *cobra.Command, args []string) {
@@ -40,7 +37,7 @@ func init() {
 		"format",
 		"f",
 		"",
-		"Шаблон формата лога, например: [Timestamp] [Level] [Content]",
+		"Шаблон формата лога, например: [Label] [Timestamp] [Date] [Node] [Time] [NodeRepeat] [Type] [Component] [Level] [Content]",
 	)
 
 	parseCmd.Args = cobra.MinimumNArgs(1)

@@ -25,5 +25,5 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.Flags().BoolP("parse", "f", false, "parse log command help")
+	rootCmd.Flags().BoolP("parse", "p", false, "parse log command help")
 }
