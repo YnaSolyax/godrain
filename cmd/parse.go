@@ -25,8 +25,8 @@ var parseCmd = &cobra.Command{
 			fmt.Println("Ошибка: Необходимо указать формат лога c помощью флага --format.")
 			return
 		}
-		parse := logparser.Log{}
-		parse.ParseLog(&storage.DBStorage{}, filename, format)
+
+		logparser.ParseLog(&storage.DBStorage{}, filename, format)
 	},
 }
 

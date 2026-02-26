@@ -2,7 +2,6 @@ package logparser
 
 import (
 	"bufio"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,13 +12,6 @@ import (
 	"github.com/pgvector/pgvector-go"
 	"go.uber.org/zap"
 )
-
-type Log struct {
-	Timestamp string `json:"timestamp"`
-	Level     string `json:"level"`
-	Cluster   string `json:"cluster"`
-	ClusterID int64  `json:"cluster_id"`
-}
 
 type fields struct {
 	Timestamp int
@@ -54,10 +46,11 @@ func GetLogFields(format string) *fields {
 	return field
 }
 
-func processBatch(d *drain3.Drain, db *storage.DBStorage, incidentID uint, lines []string, field *fields) error {
+func processBatch(d *drain3.Drain, db *storage.DBStorage, incidentID uint, lines []string, field *fields, logger *zap.Logger) error {
 
 	for _, l := range lines {
 		if len(strings.TrimSpace(l)) == 0 {
+			logger.Info("log empty")
 			continue
 		}
 
@@ -78,25 +71,26 @@ func processBatch(d *drain3.Drain, db *storage.DBStorage, incidentID uint, lines
 
 		cluster, _, err := d.AddLogMessage(cont)
 		if err != nil {
+			logger.Error("drain AddLog error", zap.Any("details", err))
 			return err
 		}
 		template := cluster.GetTemplate()
 
 		vec := pgvector.NewVector(make([]float32, 384))
 
-		defectID, foundInDB, err := db.FindDefectByVector(vec, 0.8, &zap.Logger{})
+		defectID, foundInDB, err := db.FindDefectByVector(vec, 0.8, logger)
 		if err != nil {
-			fmt.Printf("Ошибка поиска дефекта: %v\n", err)
+			logger.Error("defect not found")
 			continue
 		}
 
 		if !foundInDB {
-			defectID, err = db.CreateDefect(template, vec, &zap.Logger{})
+			defectID, err = db.CreateDefect(template, vec, logger)
 			if err != nil {
-				fmt.Printf("Ошибка создания дефекта: %v\n", err)
+				logger.Error("can't create deffect")
 				continue
 			}
-			fmt.Printf(" [DB] New defect detected: %s\n", template)
+			logger.Info("Success add defect")
 		}
 
 		err = db.SaveLogItem(entity.LogItem{
@@ -108,21 +102,20 @@ func processBatch(d *drain3.Drain, db *storage.DBStorage, incidentID uint, lines
 			ClusterID:  cluster.ClusterId,
 		})
 		if err != nil {
-			fmt.Printf("Ошибка сохранения лога в БД: %v\n", err)
+			logger.Error("can't add log to db")
+			return err
 		}
 	}
 	return nil
 }
 
-func (p *Log) ParseLog(db *storage.DBStorage, filename string, format string) error {
+func ParseLog(db *storage.DBStorage, filename string, format string) error {
 
 	logger, err := zap.NewProduction()
 	if err != nil {
 		return err
 	}
 	defer logger.Sync()
-
-	var incidentID uint = 1
 
 	d, err := drain3.NewDrain(
 		drain3.WithDepth(4),
@@ -135,14 +128,18 @@ func (p *Log) ParseLog(db *storage.DBStorage, filename string, format string) er
 
 	indexes := GetLogFields(format)
 
-	logDir := "logs"
+	logDir := "logs" //hardcode
 	fullPath := filepath.Join(logDir, filename)
 	file, err := os.Open(fullPath)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
-
+	incidentID, err := db.CreateIncident(filename)
+	if err != nil {
+		logger.Error("can't create incident")
+		return err
+	}
 	scanner := bufio.NewScanner(file)
 	buf := make([]byte, 0, 1024*1024)
 	scanner.Buffer(buf, 1024*1024)
@@ -150,24 +147,22 @@ func (p *Log) ParseLog(db *storage.DBStorage, filename string, format string) er
 	batchSize := 1000
 	batch := make([]string, 0, batchSize)
 
-	fmt.Printf("Начинаю анализ файла: %s\n", fullPath)
-
 	for scanner.Scan() {
 		line := scanner.Text()
 		batch = append(batch, line)
 
 		if len(batch) >= batchSize {
-			processBatch(d, db, incidentID, batch, indexes)
+			processBatch(d, db, incidentID, batch, indexes, logger)
 			batch = batch[:0]
 		}
 	}
 
 	if len(batch) > 0 {
-		processBatch(d, db, incidentID, batch, indexes)
+		processBatch(d, db, incidentID, batch, indexes, logger)
 	}
 
 	if err := scanner.Err(); err != nil {
-		logger.Error("Ошибка чтения файла", zap.Error(err))
+		logger.Error("can't read file", zap.Error(err))
 		return err
 	}
 

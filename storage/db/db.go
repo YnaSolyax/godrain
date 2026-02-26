@@ -47,6 +47,16 @@ func (s *DBStorage) CreateDefect(template string, v pgvector.Vector, logger *zap
 	return id, err
 }
 
+func (s *DBStorage) CreateIncident(source string) (uint, error) {
+	var id uint
+	query := `INSERT INTO incidents (source_file) VALUES ($1) RETURNING id`
+	err := s.Conn.QueryRow(query, source).Scan(&id)
+	if err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
 func (s *DBStorage) SaveLogItem(item entity.LogItem) error {
 	query := `INSERT INTO log_items (incident_id, defect_id, timestamp, level, content, cluster_id) 
               VALUES ($1, $2, $3, $4, $5, $6)`
