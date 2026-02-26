@@ -2,13 +2,15 @@ package logparser
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	storage "github.com/YnaSolyax/godrain/storage/db"
+	"github.com/YnaSolyax/godrain/storage/entity"
 	"github.com/jaeyo/go-drain3/pkg/drain3"
+	"github.com/pgvector/pgvector-go"
 	"go.uber.org/zap"
 )
 
@@ -50,12 +52,9 @@ func GetLogFields(format string) *fields {
 	}
 
 	return field
-
 }
 
-func processBatch(d *drain3.Drain, lines []string, uniqueCluster map[int64]bool, field *fields) {
-
-	processedLogs := make([]*Log, 0, len(lines))
+func processBatch(d *drain3.Drain, db *storage.DBStorage, incidentID uint, lines []string, field *fields) error {
 
 	for _, l := range lines {
 		if len(strings.TrimSpace(l)) == 0 {
@@ -63,18 +62,15 @@ func processBatch(d *drain3.Drain, lines []string, uniqueCluster map[int64]bool,
 		}
 
 		found := strings.Fields(l)
-
 		time, lvl, cont := "", "", ""
 
-		if field.Timestamp != -1 {
+		if field.Timestamp != -1 && len(found) > field.Timestamp {
 			time = found[field.Timestamp]
 		}
-
-		if field.lvl != -1 {
+		if field.lvl != -1 && len(found) > field.lvl {
 			lvl = found[field.lvl]
 		}
-
-		if field.content != -1 {
+		if field.content != -1 && len(found) > field.content {
 			cont = strings.Join(found[field.content:], " ")
 		} else {
 			cont = l
@@ -82,37 +78,51 @@ func processBatch(d *drain3.Drain, lines []string, uniqueCluster map[int64]bool,
 
 		cluster, _, err := d.AddLogMessage(cont)
 		if err != nil {
+			return err
+		}
+		template := cluster.GetTemplate()
+
+		vec := pgvector.NewVector(make([]float32, 384))
+
+		defectID, foundInDB, err := db.FindDefectByVector(vec, 0.8, &zap.Logger{})
+		if err != nil {
+			fmt.Printf("Ошибка поиска дефекта: %v\n", err)
 			continue
 		}
 
-		if !uniqueCluster[cluster.ClusterId] {
-			uniqueCluster[cluster.ClusterId] = true
-
-			newLog := &Log{
-				Timestamp: time,
-				Level:     lvl,
-				Cluster:   cluster.GetTemplate(),
-				ClusterID: cluster.ClusterId,
+		if !foundInDB {
+			defectID, err = db.CreateDefect(template, vec, &zap.Logger{})
+			if err != nil {
+				fmt.Printf("Ошибка создания дефекта: %v\n", err)
+				continue
 			}
-			processedLogs = append(processedLogs, newLog)
+			fmt.Printf(" [DB] New defect detected: %s\n", template)
 		}
-	}
 
-	if len(processedLogs) > 0 {
-		jsonData, err := json.MarshalIndent(processedLogs, "", "  ")
-		if err == nil {
-			fmt.Println(string(jsonData))
+		err = db.SaveLogItem(entity.LogItem{
+			IncidentID: incidentID,
+			DefectID:   defectID,
+			Timestamp:  time,
+			Level:      lvl,
+			Content:    template,
+			ClusterID:  cluster.ClusterId,
+		})
+		if err != nil {
+			fmt.Printf("Ошибка сохранения лога в БД: %v\n", err)
 		}
 	}
+	return nil
 }
 
-func (p *Log) ParseLog(filename string, format string) error {
+func (p *Log) ParseLog(db *storage.DBStorage, filename string, format string) error {
 
 	logger, err := zap.NewProduction()
 	if err != nil {
 		return err
 	}
 	defer logger.Sync()
+
+	var incidentID uint = 1
 
 	d, err := drain3.NewDrain(
 		drain3.WithDepth(4),
@@ -139,7 +149,6 @@ func (p *Log) ParseLog(filename string, format string) error {
 
 	batchSize := 1000
 	batch := make([]string, 0, batchSize)
-	uniqueCluster := make(map[int64]bool)
 
 	fmt.Printf("Начинаю анализ файла: %s\n", fullPath)
 
@@ -148,13 +157,13 @@ func (p *Log) ParseLog(filename string, format string) error {
 		batch = append(batch, line)
 
 		if len(batch) >= batchSize {
-			processBatch(d, batch, uniqueCluster, indexes)
+			processBatch(d, db, incidentID, batch, indexes)
 			batch = batch[:0]
 		}
 	}
 
 	if len(batch) > 0 {
-		processBatch(d, batch, uniqueCluster, indexes)
+		processBatch(d, db, incidentID, batch, indexes)
 	}
 
 	if err := scanner.Err(); err != nil {

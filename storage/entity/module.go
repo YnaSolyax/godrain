@@ -1,30 +1,34 @@
 package entity
 
 import (
-	"gorm.io/gorm"
+	"time"
+
+	"github.com/pgvector/pgvector-go"
 )
 
 type Incident struct {
-	gorm.Model
+	ID          uint
 	Description string
 	Source      string
+	CreatedAt   time.Time
 }
 
 type Defect struct {
-	gorm.Model
+	ID          uint
 	Description string
 	Solution    string
-	Logs        []LogItem `gorm:"foreignKey:DefectID"`
+	Vector      pgvector.Vector `db:"vector"`
+	CreatedAt   time.Time
 }
 
 type LogItem struct {
-	gorm.Model
+	ID         uint
 	IncidentID uint
-	DefectID   *uint
+	DefectID   uint
 	Timestamp  string
 	Level      string
 	Content    string
-	Vector     []byte
+	ClusterID  int64
 }
 
 /*

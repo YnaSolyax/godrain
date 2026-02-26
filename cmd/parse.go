@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/YnaSolyax/godrain/logparser"
+	storage "github.com/YnaSolyax/godrain/storage/db"
 	"github.com/spf13/cobra"
 )
 
@@ -25,7 +26,7 @@ var parseCmd = &cobra.Command{
 			return
 		}
 		parse := logparser.Log{}
-		parse.ParseLog(filename, format)
+		parse.ParseLog(&storage.DBStorage{}, filename, format)
 	},
 }
 
