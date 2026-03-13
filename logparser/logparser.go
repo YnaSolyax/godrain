@@ -14,30 +14,21 @@ import (
 )
 
 type fields struct {
-	Timestamp int
-	lvl       int
-	content   int
+	content int
 }
 
-func newFileds(Timestamp int, lvl int, content int) *fields {
+func newFileds(content int) *fields {
 	return &fields{
-		Timestamp: Timestamp,
-		lvl:       lvl,
-		content:   content,
+		content: content,
 	}
 }
 
 func GetLogFields(format string) *fields {
-	field := newFileds(-1, -1, -1)
+	field := newFileds(-1)
 	findformat := strings.Fields(format)
-
 	for i, ff := range findformat {
 		clean := strings.Trim(ff, "[]")
 		switch clean {
-		case "Timestamp":
-			field.Timestamp = i
-		case "Level":
-			field.lvl = i
 		case "Content":
 			field.content = i
 		}
@@ -46,7 +37,7 @@ func GetLogFields(format string) *fields {
 	return field
 }
 
-func processBatch(d *drain3.Drain, db *storage.DBStorage, incidentID uint, lines []string, field *fields, logger *zap.Logger) error {
+func processBatch(d *drain3.Drain, db *storage.DBStorage, lines []string, field *fields, logger *zap.Logger) error {
 
 	for _, l := range lines {
 		if len(strings.TrimSpace(l)) == 0 {
@@ -55,55 +46,43 @@ func processBatch(d *drain3.Drain, db *storage.DBStorage, incidentID uint, lines
 		}
 
 		found := strings.Fields(l)
-		time, lvl, cont := "", "", ""
-
-		if field.Timestamp != -1 && len(found) > field.Timestamp {
-			time = found[field.Timestamp]
-		}
-		if field.lvl != -1 && len(found) > field.lvl {
-			lvl = found[field.lvl]
-		}
+		cont := ""
 		if field.content != -1 && len(found) > field.content {
 			cont = strings.Join(found[field.content:], " ")
 		} else {
 			cont = l
 		}
 
-		cluster, _, err := d.AddLogMessage(cont)
+		cluster, clusterType, err := d.AddLogMessage(cont)
 		if err != nil {
 			logger.Error("drain AddLog error", zap.Any("details", err))
 			return err
 		}
-		template := cluster.GetTemplate()
 
 		vec := pgvector.NewVector(make([]float32, 384))
 
-		defectID, foundInDB, err := db.FindDefectByVector(vec, 0.8, logger)
+		id, err := db.FindDefectByVector(vec, 0.8, logger)
+		if id == 0 {
+			//logger.Info("id defect not found")
+			//continue
+		}
+
 		if err != nil {
 			logger.Error("defect not found")
 			continue
 		}
 
-		if !foundInDB {
-			defectID, err = db.CreateDefect(template, vec, logger)
+		if clusterType == 1 || clusterType == 2 {
+			template := cluster.GetTemplate()
+			err = db.SaveLogItem(entity.LogItem{
+				Content: template,
+			})
+			//logger.Info("Attempting to save template", zap.String("template", template))
 			if err != nil {
-				logger.Error("can't create deffect")
-				continue
+				logger.Error("can't add log to db")
+				return err
 			}
-			logger.Info("Success add defect")
-		}
 
-		err = db.SaveLogItem(entity.LogItem{
-			IncidentID: incidentID,
-			DefectID:   defectID,
-			Timestamp:  time,
-			Level:      lvl,
-			Content:    template,
-			ClusterID:  cluster.ClusterId,
-		})
-		if err != nil {
-			logger.Error("can't add log to db")
-			return err
 		}
 	}
 	return nil
@@ -135,11 +114,6 @@ func ParseLog(db *storage.DBStorage, filename string, format string) error {
 		return err
 	}
 	defer file.Close()
-	incidentID, err := db.CreateIncident(filename)
-	if err != nil {
-		logger.Error("can't create incident")
-		return err
-	}
 	scanner := bufio.NewScanner(file)
 	buf := make([]byte, 0, 1024*1024)
 	scanner.Buffer(buf, 1024*1024)
@@ -152,13 +126,13 @@ func ParseLog(db *storage.DBStorage, filename string, format string) error {
 		batch = append(batch, line)
 
 		if len(batch) >= batchSize {
-			processBatch(d, db, incidentID, batch, indexes, logger)
+			processBatch(d, db, batch, indexes, logger)
 			batch = batch[:0]
 		}
 	}
 
 	if len(batch) > 0 {
-		processBatch(d, db, incidentID, batch, indexes, logger)
+		processBatch(d, db, batch, indexes, logger)
 	}
 
 	if err := scanner.Err(); err != nil {

@@ -6,46 +6,17 @@ import (
 	"github.com/pgvector/pgvector-go"
 )
 
-type Incident struct {
-	ID          uint
-	Description string
-	Source      string
-	CreatedAt   time.Time
-}
-
 type Defect struct {
-	ID          uint
+	ID          uint `gorm:"primaryKey"`
 	Description string
 	Solution    string
-	Vector      pgvector.Vector `db:"vector"`
+	Vector      pgvector.Vector `gorm:"type:vector(384)"`
 	CreatedAt   time.Time
 }
 
 type LogItem struct {
-	ID         uint
-	IncidentID uint
-	DefectID   uint
-	Timestamp  string
-	Level      string
-	Content    string
-	ClusterID  int64
+	ID        uint  `gorm:"primaryKey"`
+	DefectID  *uint `gorm:"index"`
+	Content   string
+	CreatedAt time.Time
 }
-
-/*
-table1 -incident
-ID       desc source
-...      ..  BGL.log
-
-table2 - defectss
-ID_logs        desc solution
-logs1 ... 100  ...   "упал сервер"
-при том хрнаить лог как json
-
-неизвестная длина для сравнения
-пример в базе 100, в поступившем 1000
-
-vector - отдельная сущность как суммарный контент всех логов
-на уровне дефекта
-
-переделать алгоритм вектора и использовать библиотеки bgVector
-*/
