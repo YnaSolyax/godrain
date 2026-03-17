@@ -29,7 +29,16 @@ var defectCmd = &cobra.Command{
 		}
 
 		st := storage.NewDBStorage(db, logger)
-		vec := make([]float32, 384)
+		existingID, vec, err := st.FindDefectByText(description, 0.8, logger)
+		if err != nil {
+			logger.Error("failed to get vector from ollama", zap.Error(err))
+			return
+		}
+
+		if existingID != 0 {
+			logger.Info("defect already exist")
+			return
+		}
 		err = st.CreateDefect(description, solution, vec)
 		if err != nil {
 			logger.Error("failed to create defect", zap.Error(err))

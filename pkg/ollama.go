@@ -1,4 +1,3 @@
-// прототип
 package ollama
 
 import (

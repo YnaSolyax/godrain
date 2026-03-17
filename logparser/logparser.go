@@ -9,7 +9,6 @@ import (
 	storage "github.com/YnaSolyax/godrain/storage/db"
 	"github.com/YnaSolyax/godrain/storage/entity"
 	"github.com/jaeyo/go-drain3/pkg/drain3"
-	"github.com/pgvector/pgvector-go"
 	"go.uber.org/zap"
 )
 
@@ -55,16 +54,19 @@ func processBatch(d *drain3.Drain, db *storage.DBStorage, lines []string, field 
 
 		cluster, clusterType, err := d.AddLogMessage(cont)
 		if err != nil {
-			logger.Error("drain AddLog error", zap.Any("details", err))
-			return err
+			logger.Error("drain AddLog error", zap.Error(err))
+			continue
+		}
+		if clusterType != 1 && clusterType != 2 {
+			logger.Info("non unic cluster")
+			continue
 		}
 
-		vec := pgvector.NewVector(make([]float32, 384))
+		template := cluster.GetTemplate()
+		id, _, err := db.FindDefectByText(template, 0.8, logger)
 
-		id, err := db.FindDefectByVector(vec, 0.8, logger)
-		if id == 0 {
-			//logger.Info("id defect not found")
-			//continue
+		item := entity.LogItem{
+			Content: template,
 		}
 
 		if err != nil {
@@ -72,17 +74,13 @@ func processBatch(d *drain3.Drain, db *storage.DBStorage, lines []string, field 
 			continue
 		}
 
-		if clusterType == 1 || clusterType == 2 {
-			template := cluster.GetTemplate()
-			err = db.SaveLogItem(entity.LogItem{
-				Content: template,
-			})
-			//logger.Info("Attempting to save template", zap.String("template", template))
-			if err != nil {
-				logger.Error("can't add log to db")
-				return err
-			}
+		if id != 0 {
+			item.DefectID = &id
+		}
 
+		if err := db.SaveLogItem(item); err != nil {
+			logger.Error("can't add log to db", zap.Error(err))
+			return err
 		}
 	}
 	return nil

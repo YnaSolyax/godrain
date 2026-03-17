@@ -3,6 +3,7 @@ package storage
 import (
 	"time"
 
+	ollama "github.com/YnaSolyax/godrain/pkg"
 	"github.com/YnaSolyax/godrain/storage/entity"
 	"github.com/pgvector/pgvector-go"
 	"go.uber.org/zap"
@@ -48,22 +49,24 @@ func Conn(connStr string, logger *zap.Logger) (*gorm.DB, error) {
 	return db, nil
 }
 
-func (s *DBStorage) FindDefectByVector(vector pgvector.Vector, threshold float64, logger *zap.Logger) (uint, error) {
+func (s *DBStorage) FindDefectByText(text string, threshold float64, logger *zap.Logger) (uint, []float32, error) {
+
+	vec, err := ollama.GetVector(text)
+	if err != nil {
+		logger.Error("ollama err")
+		return 0, nil, err
+	}
 
 	var defect entity.Defect
-	query := `SELECT * FROM defects WHERE 1 - (vector <=> ?) > ? ORDER BY vector <=> ? LIMIT 1`
-	err := s.DB.Raw(query, vector, threshold, vector).Scan(&defect).Error
+	pgVec := pgvector.NewVector(vec)
+	query := `SELECT id FROM defects WHERE 1 - (vector <=> ?) > ? ORDER BY vector <=> ? LIMIT 1`
+
+	err = s.DB.Raw(query, pgVec, threshold, pgVec).Scan(&defect).Error
 	if err != nil {
-		logger.Error("raw error")
-		return 0, err
+		return 0, vec, err
 	}
 
-	if defect.ID == 0 {
-		logger.Info("id null")
-		return 0, nil
-	}
-
-	return defect.ID, nil
+	return defect.ID, vec, nil
 }
 
 func (s *DBStorage) SaveLogItem(item entity.LogItem) error {
