@@ -3,7 +3,7 @@ package storage
 import (
 	"time"
 
-	ollama "github.com/YnaSolyax/godrain/pkg"
+	ollama "github.com/YnaSolyax/godrain/internal/pkg"
 	"github.com/YnaSolyax/godrain/storage/entity"
 	"github.com/pgvector/pgvector-go"
 	"go.uber.org/zap"
@@ -49,11 +49,11 @@ func Conn(connStr string, logger *zap.Logger) (*gorm.DB, error) {
 	return db, nil
 }
 
-func (s *DBStorage) FindDefectByText(text string, threshold float64, logger *zap.Logger) (uint, []float32, error) {
+func (s *DBStorage) FindDefectByText(text string, threshold float64) (uint, []float32, error) {
 
 	vec, err := ollama.GetVector(text)
 	if err != nil {
-		logger.Error("ollama err")
+		s.logger.Error("ollama err")
 		return 0, nil, err
 	}
 
@@ -71,7 +71,6 @@ func (s *DBStorage) FindDefectByText(text string, threshold float64, logger *zap
 
 func (s *DBStorage) SaveLogItem(item entity.LogItem) error {
 	err := s.DB.Create(&item).Error
-	s.logger.Info("Create")
 	if err != nil {
 		s.logger.Error("GORM create error", zap.Error(err))
 		return err

@@ -2,8 +2,9 @@ package cmd
 
 import (
 	"fmt"
+	"time"
 
-	"github.com/YnaSolyax/godrain/logparser"
+	"github.com/YnaSolyax/godrain/internal/logparser"
 	storage "github.com/YnaSolyax/godrain/storage/db"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
@@ -16,7 +17,7 @@ var parseCmd = &cobra.Command{
 	Short: "parsing a file with logs of a specific format",
 	Long: `This command is used for logs with a known format.
 	The input is the file name and log format, for example: 
-	parse BGL.log [Label] [Timestamp] [Date] [Node] [Time] [NodeRepeat] [Type] [Component] [Level] [Content]"`,
+	parse BGL.log -f(or --format) [Label] [Timestamp] [Date] [Node] [Time] [NodeRepeat] [Type] [Component] [Level] [Content]"`,
 
 	Run: func(cmd *cobra.Command, args []string) {
 
@@ -36,11 +37,14 @@ var parseCmd = &cobra.Command{
 		}
 
 		st := storage.NewDBStorage(db, logger)
-
-		err = logparser.ParseLog(st, filename, logFormat)
+		lp := logparser.NewParser(st, 1000, logger)
+		start := time.Now()
+		err = lp.ParseLog(filename, logFormat)
 		if err != nil {
 			logger.Error("cant' parse log")
 		}
+		duration := time.Since(start)
+		fmt.Printf("\n=== Parsing finished in: %v ===\n", duration)
 	},
 }
 

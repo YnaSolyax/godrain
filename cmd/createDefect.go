@@ -29,7 +29,7 @@ var defectCmd = &cobra.Command{
 		}
 
 		st := storage.NewDBStorage(db, logger)
-		existingID, vec, err := st.FindDefectByText(description, 0.8, logger)
+		existingID, vec, err := st.FindDefectByText(description, 0.8)
 		if err != nil {
 			logger.Error("failed to get vector from ollama", zap.Error(err))
 			return
