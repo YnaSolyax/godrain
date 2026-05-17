@@ -2,12 +2,14 @@ package logparser
 
 import (
 	"bufio"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/YnaSolyax/godrain/storage/entity"
+	"github.com/N0tF0und04/godrain/storage/entity"
 	"github.com/jaeyo/go-drain3/pkg/drain3"
+	"github.com/pgvector/pgvector-go"
 	"go.uber.org/zap"
 )
 
@@ -36,7 +38,7 @@ func NewParser(repo Repository, batchSize int, logger *zap.Logger) *Parser {
 }
 
 type Repository interface {
-	FindDefectByText(text string, threshold float64) (uint, []float32, error)
+	FindDefectByText(ctx context.Context, text string, threshold float64) (uint, []float32, error)
 	SaveLogItem(item entity.LogItem) error
 }
 
@@ -59,7 +61,7 @@ func (p *Parser) sanitize(s string) string {
 	return strings.ReplaceAll(s, "\x00", "")
 }
 
-func (p *Parser) processBatch(d *drain3.Drain, lines []string, field *fields) error {
+func (p *Parser) processBatch(ctx context.Context, d *drain3.Drain, lines []string, field *fields) error {
 
 	for _, l := range lines {
 		if len(strings.TrimSpace(l)) == 0 {
@@ -87,10 +89,11 @@ func (p *Parser) processBatch(d *drain3.Drain, lines []string, field *fields) er
 		}
 
 		template := cluster.GetTemplate()
-		id, _, err := p.repo.FindDefectByText(template, 0.6)
+		id, vector, err := p.repo.FindDefectByText(ctx, template, 0.6)
 		cleanContent := p.sanitize(template)
 		item := entity.LogItem{
 			Content: cleanContent,
+			Vector:  pgvector.NewVector(vector),
 		}
 
 		if err != nil {
@@ -110,7 +113,7 @@ func (p *Parser) processBatch(d *drain3.Drain, lines []string, field *fields) er
 	return nil
 }
 
-func (p *Parser) ParseLog(filename string, format string) error {
+func (p *Parser) ParseLog(ctx context.Context, filename string, format string) error {
 
 	d, err := drain3.NewDrain(
 		drain3.WithDepth(3),
@@ -141,13 +144,13 @@ func (p *Parser) ParseLog(filename string, format string) error {
 		batch = append(batch, line)
 
 		if len(batch) >= p.batchSize {
-			p.processBatch(d, batch, indexes)
+			p.processBatch(ctx, d, batch, indexes)
 			batch = batch[:0]
 		}
 	}
 
 	if len(batch) > 0 {
-		p.processBatch(d, batch, indexes)
+		p.processBatch(ctx, d, batch, indexes)
 	}
 
 	if err := scanner.Err(); err != nil {

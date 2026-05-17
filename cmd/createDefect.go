@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
+	"time"
 
-	storage "github.com/YnaSolyax/godrain/storage/db"
+	storage "github.com/N0tF0und04/godrain/storage/db"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 )
@@ -28,8 +30,11 @@ var defectCmd = &cobra.Command{
 			return
 		}
 
+		ctx, cancel := context.WithTimeout(cmd.Context(), 180*time.Second)
+		defer cancel()
+
 		st := storage.NewDBStorage(db, logger)
-		existingID, vec, err := st.FindDefectByText(description, 0.8)
+		existingID, vec, err := st.FindDefectByText(ctx, description, 0.6)
 		if err != nil {
 			logger.Error("failed to get vector from ollama", zap.Error(err))
 			return
@@ -39,7 +44,7 @@ var defectCmd = &cobra.Command{
 			logger.Info("defect already exist")
 			return
 		}
-		err = st.CreateDefect(description, solution, vec)
+		err = st.CreateDefect(ctx, description, solution, vec)
 		if err != nil {
 			logger.Error("failed to create defect", zap.Error(err))
 			return

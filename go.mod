@@ -1,4 +1,4 @@
-module github.com/YnaSolyax/godrain
+module github.com/N0tF0und04/godrain
 
 go 1.24.0
 

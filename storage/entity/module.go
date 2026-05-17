@@ -18,5 +18,6 @@ type LogItem struct {
 	ID        uint  `gorm:"primaryKey"`
 	DefectID  *uint `gorm:"index"`
 	Content   string
+	Vector    pgvector.Vector `gorm:"type:vector(384)"`
 	CreatedAt time.Time
 }

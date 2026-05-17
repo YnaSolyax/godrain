@@ -2,6 +2,7 @@ package ollama
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -16,7 +17,7 @@ type EmbeddingsResponse struct {
 	Embedding []float32 `json:"embedding"`
 }
 
-func GetVector(text string) ([]float32, error) {
+func GetVector(ctx context.Context, text string) ([]float32, error) {
 
 	url := "http://localhost:11434/api/embeddings"
 	requestBody, err := json.Marshal(EmbeddingsRequest{
@@ -27,7 +28,14 @@ func GetVector(text string) ([]float32, error) {
 		return nil, err
 	}
 
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(requestBody))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(requestBody))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}

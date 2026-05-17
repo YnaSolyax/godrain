@@ -1,11 +1,12 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"time"
 
-	"github.com/YnaSolyax/godrain/internal/logparser"
-	storage "github.com/YnaSolyax/godrain/storage/db"
+	"github.com/N0tF0und04/godrain/internal/logparser"
+	storage "github.com/N0tF0und04/godrain/storage/db"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 )
@@ -20,6 +21,8 @@ var parseCmd = &cobra.Command{
 	parse BGL.log -f(or --format) [Label] [Timestamp] [Date] [Node] [Time] [NodeRepeat] [Type] [Component] [Level] [Content]"`,
 
 	Run: func(cmd *cobra.Command, args []string) {
+		ctx, cancel := context.WithTimeout(cmd.Context(), 10*time.Minute)
+		defer cancel()
 
 		filename := args[0]
 
@@ -39,7 +42,7 @@ var parseCmd = &cobra.Command{
 		st := storage.NewDBStorage(db, logger)
 		lp := logparser.NewParser(st, 1000, logger)
 		start := time.Now()
-		err = lp.ParseLog(filename, logFormat)
+		err = lp.ParseLog(ctx, filename, logFormat)
 		if err != nil {
 			logger.Error("cant' parse log")
 		}
